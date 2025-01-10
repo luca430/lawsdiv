@@ -28,7 +28,7 @@ pocc_gamma_ind <- proj %>% left_join(gamma_pars) %>% left_join(mean_pars ) %>%
   scale_x_continuous( "Observed occupancy" ) +   scalecols + scaleshapes +
   facet_wrap( ~ sname ) + theme(legend.position = "none"  )
 pocc_gamma_ind
-#ggsave( filename =  "./predocc_gamma_ind.pdf", pocc_gamma_ind, width = 10, height = 8  )
+ggsave( filename =  "./predocc_gamma_ind.pdf", pocc_gamma_ind, width = 10, height = 8  )
 
 pocc_gamma <- proj %>% left_join(gamma_pars) %>% left_join(mean_pars ) %>%
   mutate( beta = ifelse(is.na(beta), mbeta, beta)  ) %>% mutate( theta = f/beta  ) %>%  
@@ -46,7 +46,7 @@ pocc_gamma <- proj %>% left_join(gamma_pars) %>% left_join(mean_pars ) %>%
   scale_x_continuous( "Observed occupancy\n(fraction of samples\nwhere an OTU is present)" ) +   scalecols + scaleshapes +
   theme(legend.position = "none"  )
 pocc_gamma
-#ggsave( filename =  "./predocc_gamma.pdf", pocc_gamma, width = 4.5, height = 3.5  )
+ggsave( filename =  "./predocc_gamma.pdf", pocc_gamma, width = 4.5, height = 3.5  )
 
 
 
@@ -114,4 +114,4 @@ pocc_logn <- ggplot( op ) + mytheme +
   scale_x_continuous( "Observed occupancy" ) +   scalecols + scaleshapes +
   facet_wrap( ~ sname ) + theme(legend.position = "none"  )
 pocc_logn
-#ggsave( filename =  "../SI/predocc_logn_ind.pdf", pocc_logn, width = 10, height = 8  )
+ggsave( filename =  "../SI/predocc_logn_ind.pdf", pocc_logn, width = 10, height = 8  )
