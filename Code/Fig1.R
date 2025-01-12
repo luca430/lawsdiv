@@ -34,7 +34,7 @@ p1 <- statp %>%  mutate( xx = runif(dim(statp)[1])  )  %>%  left_join(mean_pars)
   scale_y_log10( "Probability density" , labels = fancy_scientific   )  +
   theme( legend.position = "none" ) #+    facet_wrap( ~ sname )
 p1
-ggsave( filename =  "../fig1/logn_aver.pdf", p1, width = 4., height = 3.5  )
+#ggsave( filename =  "../fig1/logn_aver.pdf", p1, width = 4., height = 3.5  )
 
 
 plnind <- statp %>%  mutate( xx = runif(dim(statp)[1])  )  %>%  left_join(mean_pars) %>% filter(lf > c, n > 10) %>% 
@@ -51,7 +51,7 @@ plnind <- statp %>%  mutate( xx = runif(dim(statp)[1])  )  %>%  left_join(mean_p
   scale_y_log10( "Probability density"   )  +
   theme( legend.position = "none" ) +    facet_wrap( ~ sname )
 plnind
-ggsave( filename =  "../fig1/logn_ind.pdf", plnind, width = 10, height = 8  )
+#ggsave( filename =  "../fig1/logn_ind.pdf", plnind, width = 10, height = 8  )
 
 
 rm(statp)
@@ -76,7 +76,7 @@ ptaylor_ind <- gamma_pars %>%  ggplot() + mytheme +
   scale_x_log10( "Average abundance", limits = c(-2.5,2.5) ) +
   scale_y_log10( "Variance of abundance across samples"   )  +
   theme( legend.position = "none" ) +    facet_wrap( ~ sname ) 
-ggsave( filename =  "../fig1/taylor_ind.pdf", ptaylor_ind, width = 10, height = 8  )
+#ggsave( filename =  "../fig1/taylor_ind.pdf", ptaylor_ind, width = 10, height = 8  )
 ptaylor_ind
 
 ptaylor_all <- taylor_binnes  %>% 
@@ -92,7 +92,7 @@ ptaylor_all <- taylor_binnes  %>%
   scale_x_log10( "Average\nrelative abundance", limits = c(-2.5,2.5), labels = fancy_scientificb ) +
   scale_y_log10( "Variance of\nrelative abundance" , labels = fancy_scientific  )  +
   theme( legend.position = "none" ) 
-ggsave( filename =  "../fig1/taylor_ind.pdf", ptaylor_all, width = 4.3, height = 3.5  )
+#ggsave( filename =  "../fig1/taylor_ind.pdf", ptaylor_all, width = 4.3, height = 3.5  )
 ptaylor_all
 
 
