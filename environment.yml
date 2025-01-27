@@ -1,19 +1,13 @@
-name: base
+name: lawsdiv
 channels:
   - defaults
   - conda
   - https://repo.anaconda.com/pkgs/main
   - https://repo.anaconda.com/pkgs/r
 dependencies:
-  - python=3.12
-  - conda==24.11.3
-  - setuptools
-  - pip
-  - wheel
-  - conda-content-trust
-  - conda-libmamba-solver
-  - menuinst
-  - anaconda-anon-usage
-  - jupyter
+  - ipykernel
+  - matplotlib
+  - numpy
+  - pandas
+  - scipy
   - conda-forge::pyreadr
-prefix: /home/luca/miniconda3
