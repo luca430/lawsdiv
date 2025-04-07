@@ -10,4 +10,3 @@ dependencies:
   - numpy
   - pandas
   - scipy
-  - conda-forge::pyreadr
