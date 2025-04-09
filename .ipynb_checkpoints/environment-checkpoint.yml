@@ -1,0 +1,12 @@
+name: lawsdiv
+channels:
+  - defaults
+  - conda
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - ipykernel
+  - matplotlib
+  - numpy
+  - pandas
+  - scipy
