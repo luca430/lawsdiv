@@ -1,2 +1,5 @@
 # Don't include synthetic data
 Data/synthetic/
+
+# Don't include images
+Images/
