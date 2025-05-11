@@ -46,12 +46,11 @@ end
 function make_Taylor(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="Taylor.png", plot_title="Taylor's law")
 
     S = length(data[1,:])
-    n = floor(length(data[:,1]) / 2)
-    mean_data = [mean(data[Int64(n):end,i]) for i in 1:S]
-    var_data = [var(data[Int64(n):end,i]) for i in 1:S]
+    mean_data = [mean(data[:,i]) for i in 1:S]
+    var_data = [var(data[:,i]) for i in 1:S]
 
-    bmin = round(minimum(log.(mean_data)))
-    bmax = round(maximum(log.(mean_data)))
+    bmin = minimum(log.(mean_data))
+    bmax = maximum(log.(mean_data))
     binedges = bmin:Δb:bmax
     centers = 0.5 .* (binedges[2:end] .+ binedges[1:end-1])
     yy = [mean(log.(var_data[(log.(mean_data) .>= binedges[i]) .& (log.(mean_data) .< binedges[i+1])])) for i in 1:length(binedges)-1]
@@ -86,11 +85,11 @@ end
 function make_MAD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="MAD.png", plot_title="MAD")
 
     S = length(data[1,:])
-    n = floor(length(data[:,1]) / 2)
-    log_data = [mean(log.(data[Int64(n):end,i][data[Int64(n):end,i] .> 0.0])) for i in 1:S]
+    n = length(data[:,1])
+    log_data = [mean(log.(data[:,i][data[:,i] .> 0.0])) for i in 1:S]
     
-    bmin = round(minimum(log_data))
-    bmax = round(maximum(log_data))
+    bmin = floor(minimum(log_data))
+    bmax = ceil(maximum(log_data))
     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
     
     # Renormalize the histogram and shift the centers
@@ -159,46 +158,96 @@ function AFD(model, p;
     return Dict("e_afd" => e_afd, "t_afd" => t_afd, "fig" => combined)
 end
 
-function Taylor(model, p; y0=0.1, skip=1,
+function Taylor(model, p;
+        y0 = 1.0, temporal=true, ensemble=true, skip=1, n_ens=100, S_reduce=100, n_reduce=5,
         Δb=0.05, plot_fig=true, save_plot=false, plot_name="Taylor.png", kwargs...)
-    
-    S, Δt, n = p
-    S, n = Int64(S), Int64(n)
-    y = model(S, y0 .* rand(S), Δt, n; kwargs...)
-    y = y[1:skip:end, :] # Skip entries
-    y ./= sum(y, dims=2) # Normalize entries
 
-    taylor = make_Taylor(y; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="Taylor's law")
+    e_taylor, t_taylor = Dict(), Dict()
+    if temporal
+        S, Δt, n = p
+        S, n = Int64(S), Int64(n)
+        y = model(S, y0 .* rand(S), Δt, n; kwargs...)
+        y = y[1:skip:end, :] # Skip entries
+        y ./= sum(y, dims=2) # Normalize entries
+    
+        t_taylor = make_Taylor(y; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="Temporal Taylor's law")
+    end
+
+    if ensemble
+        S, Δt, n = p
+        S, n = Int64(floor(S / S_reduce)), Int64(floor(n / n_reduce))
+        state = rand(S)
+        initial_state = vcat([rand(S) for _ in 1:n_ens]...)
+        y = model(n_ens * S, y0 .* initial_state, Δt, n; kwargs...)
+        y = y[1:skip:end, :] # Skip entries
+        y ./= sum(y, dims=2) # Normalize entries
+
+        data = reshape(vcat([y[end, (j - 1)*S + 1:j*S] for j in 1:n_ens]...), S, n_ens)'
+    
+        e_taylor = make_Taylor(data; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="Ensemble Taylor's law")
+    end
 
     if plot_fig
-        fig = plot(taylor["fig"])
+        if (ensemble) & (temporal)
+            combined = plot(e_taylor["fig"], t_taylor["fig"], layout = (1, 2))
+        elseif (ensemble) & (!temporal)
+            combined = plot(e_taylor["fig"])
+        elseif (!ensemble) & (temporal)
+            combined = plot(t_taylor["fig"])
+        end
+
         if save_plot
             savefig(plot_name)
         end
     end
     
-    return Dict("taylor" => taylor, "fig" => fig)
+    return Dict("e_taylor" => e_taylor, "t_taylor" => t_taylor, "fig" => combined)
 end
 
-function MAD(model, p; y0=0.1, skip=1,
+function MAD(model, p;
+        y0 = 1.0, temporal=true, ensemble=true, skip=1, n_ens=100, S_reduce=100, n_reduce=5,
         Δb=0.05, plot_fig=true, save_plot=false, plot_name="MAD.png", kwargs...)
-    
-    S, Δt, n = p
-    S, n = Int64(S), Int64(n)
-    y = model(S, y0 .* rand(S), Δt, n; kwargs...)
-    y = y[1:skip:end, :] # Skip entries
-    y ./= sum(y, dims=2) # Normalize entries
 
-    mad = make_MAD(y; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="MAD")
+    e_MAD, t_MAD = Dict(), Dict()
+    if temporal
+        S, Δt, n = p
+        S, n = Int64(S), Int64(n)
+        y = model(S, y0 .* rand(S), Δt, n; kwargs...)
+        y = y[1:skip:end, :] # Skip entries
+        y ./= sum(y, dims=2) # Normalize entries
+    
+        t_MAD = make_MAD(y; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="Temporal MAD")
+    end
+
+    if ensemble
+        S, Δt, n = p
+        S, n = Int64(floor(S / S_reduce)), Int64(floor(n / n_reduce))
+        state = rand(S)
+        initial_state = vcat([rand(S) for _ in 1:n_ens]...)
+        y = model(n_ens * S, y0 .* initial_state, Δt, n; kwargs...)
+        y = y[1:skip:end, :] # Skip entries
+        y ./= sum(y, dims=2) # Normalize entries
+
+        data = reshape(vcat([y[end, (j - 1)*S + 1:j*S] for j in 1:n_ens]...), S, n_ens)'
+    
+        e_MAD = make_MAD(data; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="Ensemble MAD")
+    end
 
     if plot_fig
-        fig = plot(mad["fig"])
+        if (ensemble) & (temporal)
+            combined = plot(e_MAD["fig"], t_MAD["fig"], layout = (1, 2))
+        elseif (ensemble) & (!temporal)
+            combined = plot(e_MAD["fig"])
+        elseif (!ensemble) & (temporal)
+            combined = plot(t_MAD["fig"])
+        end
+
         if save_plot
             savefig(plot_name)
         end
     end
     
-    return Dict("mad" => mad, "fig" => fig)
+    return Dict("e_mad" => e_MAD, "t_mad" => t_MAD, "fig" => combined)
 end
 
 end # end module
