@@ -2,7 +2,7 @@ module PlotDistributions
 
 using Statistics, StatsBase
 using FHist
-using Plots
+using Plots, Measures
 using Distributions, SpecialFunctions, LsqFit
 
 function make_AFD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="AFD.png", plot_title="AFD")
@@ -49,8 +49,8 @@ function make_Taylor(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name=
     mean_data = [mean(data[:,i]) for i in 1:S]
     var_data = [var(data[:,i]) for i in 1:S]
 
-    bmin = minimum(log.(mean_data))
-    bmax = maximum(log.(mean_data))
+    bmin = floor(minimum(log.(mean_data)))
+    bmax = ceil(maximum(log.(mean_data)))
     binedges = bmin:Δb:bmax
     centers = 0.5 .* (binedges[2:end] .+ binedges[1:end-1])
     yy = [mean(log.(var_data[(log.(mean_data) .>= binedges[i]) .& (log.(mean_data) .< binedges[i+1])])) for i in 1:length(binedges)-1]
@@ -143,7 +143,7 @@ function AFD(model, p;
 
     if plot_fig
         if (ensemble) & (temporal)
-            combined = plot(e_afd["fig"], t_afd["fig"], layout = (1, 2))
+            combined = plot(e_afd["fig"], t_afd["fig"], layout = (1, 2), size=(800,350), margin=5mm)
         elseif (ensemble) & (!temporal)
             combined = plot(e_afd["fig"])
         elseif (!ensemble) & (temporal)
@@ -175,21 +175,21 @@ function Taylor(model, p;
 
     if ensemble
         S, Δt, n = p
-        S, n = Int64(floor(S / S_reduce)), Int64(floor(n / n_reduce))
-        state = rand(S)
-        initial_state = vcat([rand(S) for _ in 1:n_ens]...)
-        y = model(n_ens * S, y0 .* initial_state, Δt, n; kwargs...)
+        red_S, red_n = Int64(floor(S / S_reduce)), Int64(floor(n / n_reduce))
+        state = rand(red_S)
+        initial_state = vcat([rand(red_S) for _ in 1:n_ens]...)
+        y = model(n_ens * red_S, y0 .* initial_state, Δt, red_n; kwargs...)
         y = y[1:skip:end, :] # Skip entries
         y ./= sum(y, dims=2) # Normalize entries
 
-        data = reshape(vcat([y[end, (j - 1)*S + 1:j*S] for j in 1:n_ens]...), S, n_ens)'
+        data = reshape(vcat([y[end, (j - 1)*red_S + 1:j*red_S] for j in 1:n_ens]...), red_S, n_ens)'
     
         e_taylor = make_Taylor(data; Δb=Δb, plot_fig=plot_fig, save_plot=false, plot_name=plot_name, plot_title="Ensemble Taylor's law")
     end
 
     if plot_fig
         if (ensemble) & (temporal)
-            combined = plot(e_taylor["fig"], t_taylor["fig"], layout = (1, 2))
+            combined = plot(e_taylor["fig"], t_taylor["fig"], layout = (1, 2), size=(800,350), margin=5mm)
         elseif (ensemble) & (!temporal)
             combined = plot(e_taylor["fig"])
         elseif (!ensemble) & (temporal)
