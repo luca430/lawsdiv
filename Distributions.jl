@@ -94,7 +94,7 @@ function make_MAD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="MA
 
     S = size(data)[2]
     non_zero_data = [data[:,i][data[:,i] .> 0.0] for i in 1:S]
-    log_data = [mean(log.(x)) for x in non_zero_data]
+    log_data = [log(mean(x)) for x in non_zero_data]
     
     bmin = floor(minimum(log_data))
     bmax = ceil(maximum(log_data))
@@ -162,7 +162,7 @@ function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=noth
     otu_count = 0 # Needed for normalization
     for i in 1:N_species
         # Compute non-uniform FFT only for a 'sufficient' number of samples
-        if count(ismissing.(mat[:,i])) < missing_thresh
+        if count(.!ismissing.(mat[:,i])) > missing_thresh
             otu_count += 1
             
             x = mat[:,i][.!ismissing.(mat[:,i])]
@@ -220,7 +220,7 @@ end
 
 ### HELPER FUNCTIONS
 # -- Custom autocorrelation function that skips missing entries at each lag --
-function autocor_skipmissing(x::Vector{Union{Missing, Float64}}, lag::Int)
+function autocor_skipmissing(x::Union{Vector{Float64}, Vector{Union{Missing, Float64}}}, lag::Int)
     n = length(x)
 
     if lag == 0
@@ -253,32 +253,35 @@ function preprocess_matrix(matrix_data::Matrix{Float64}; make_log::Bool=false)
     return mat
 end
 
-# -- Main autocorrelation loop --
 function compute_lagged_autocorrelations(matrix_data::Matrix{Float64}, max_lag::Int64; make_log::Bool=false, missing_thresh::Int64=0)
     mat = preprocess_matrix(matrix_data, make_log=make_log)
 
-    corrs = []
+    corrs = Vector{Vector{Float64}}()
 
     for i in 1:size(mat, 2)
         x = mat[:, i]
-        if count(ismissing.(x)) < missing_thresh
-            c = []
+        if count(.!ismissing.(x)) > missing_thresh
+            c = Float64[]
             for lag in 0:max_lag
                 r = autocor_skipmissing(x, lag)
                 push!(c, r)
             end
-    
             push!(corrs, c)
         end
     end
 
+    # Sanity check: all vectors same length
+    @assert all(length(c) == max_lag + 1 for c in corrs) "Autocorr vectors are not uniform in length"
+
+    # Proper matrix creation
     corrs_mat = hcat(corrs...)
 
-    # Mean correlation per lag (row-wise), skipping missing
+    # Mean across columns (i.e. for each lag)
     mean_corrs = mapslices(x -> mean(skipmissing(x)), corrs_mat; dims=2)
 
     return mean_corrs, corrs_mat
 end
+
 
 
 end # end module
