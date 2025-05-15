@@ -64,31 +64,6 @@ function GetLongData(path; min_samples=1, min_counts=1, min_nreads=1)
     return sep_data
 end
 
-function ComputeLongFreqs(df)
-    # Compute relative abundance per run
-    df.rel_abundance = df.count ./ df.nreads
-
-    # Compute tf (mean relative abundance when present) and o (occupancy)
-    agg = combine(groupby(df, [:otu_id, :experiment_day])) do sdf
-        # All relative abundances (some may be 0)
-        abundances = sdf.rel_abundance
-
-        # Detected runs (non-zero counts)
-        detected = sdf.count .> 0
-        tf = mean(abundances[detected])           # mean abundance when detected
-        o = sum(detected) / length(abundances)    # fraction of runs with detection
-
-        (; otu_id = sdf.otu_id[1],
-           experiment_day = sdf.experiment_day[1],
-           tf = tf,
-           o = o,
-           f = tf * o)
-    end
-
-    return agg[:, [:otu_id, :experiment_day, :f]]
-end
-
-
 end # end module
 
 
