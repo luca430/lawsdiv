@@ -128,7 +128,7 @@ end
 
 function make_lagCorr(data; missing_thresh=0, max_lag=Int64(floor(size(data,1) / 2)), make_log=false, plot_fig=false, save_plot=false, plot_name="autocorrelation.png", plot_title="autocorrelation", data_label="data")
 
-    mean_corrs, corrs_mat = compute_lagged_autocorrelations(data, max_lag, make_log=true, missing_thresh=missing_thresh)
+    mean_corrs, corrs_mat = compute_lagged_autocorrelations(data, max_lag, make_log=make_log, missing_thresh=missing_thresh)
     n_series = size(corrs_mat, 2)
     
     fig = plot(xlabel="lag", ylabel="autocorrelation", title=plot_title)
@@ -256,12 +256,12 @@ end
 function compute_lagged_autocorrelations(matrix_data::Matrix{Float64}, max_lag::Int64; make_log::Bool=false, missing_thresh::Int64=0)
     mat = preprocess_matrix(matrix_data, make_log=make_log)
 
-    corrs = Vector{Vector{Float64}}()
+    corrs = Vector{Vector{Union{Missing, Float64}}}()
 
     for i in 1:size(mat, 2)
         x = mat[:, i]
         if count(.!ismissing.(x)) > missing_thresh
-            c = Float64[]
+            c = Vector{Union{Missing, Float64}}()
             for lag in 0:max_lag
                 r = autocor_skipmissing(x, lag)
                 push!(c, r)
