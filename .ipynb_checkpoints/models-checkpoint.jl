@@ -4,97 +4,71 @@ using Random, Distributions, SpecialFunctions
 using LinearAlgebra, SparseArrays
 using DifferentialEquations, DiffEqCallbacks
 
-function lotka_volterra(S, y0, Δt, n; r=1.0, K=ones(S), σ=1.0, ε=1e-6, skip=1)
-    # Track which species are extinct
-    extinct = falses(S)
+function logistic_growth(S, y0, Δt, n; r=1.0, K=ones(S), σ=1.0, ε=1e-6, skip=1)
 
-    # Deterministic part
     function logistic!(du, u, p, t)
-        r, K, σ, extinct = p
+        r, K, σ = p
         @inbounds for i in 1:S
-            if extinct[i]
-                du[i] = 0.0
-            else
-                du[i] = r * u[i] * (1.0 - u[i] / K[i])
-            end
+            # u_val = u[i] < ε ? 0.0 : u[i]
+            u_val = max(0.0, u[i])
+            du[i] = r * u_val * (1.0 - u_val / K[i])
         end
     end
 
-    # Stochastic part (multiplicative noise)
     function diffusion!(du, u, p, t)
         σ = p[3]
-        extinct = p[4]
         @inbounds for i in 1:S
-            du[i] = extinct[i] ? 0.0 : σ * u[i]
+            # u_val = u[i] < ε ? 0.0 : u[i]  # Clamp input to avoid negative stochastic pushes
+            u_val = max(0.0, u[i])
+            du[i] = σ * u_val
         end
     end
 
-    # Extinction condition: any new u[i] < ε for non-extinct species
     function condition(u, t, integrator)
-        any((u .< ε) .& .!integrator.p[4])
+        any(u .< 0)
     end
-
-    # Apply extinction: zero out and flag extinct species
-    function apply_extinction!(integrator)
-        u = integrator.u
-        extinct = integrator.p[4]
-        @inbounds for i in 1:S
-            if u[i] < ε
-                u[i] = 0.0
-                extinct[i] = true
-            elseif u[i] < 0.0
-                u[i] = 0.0  # Clamp negative values too, just in case
-            end
-        end
+    
+    function apply_clamp!(integrator)
+        @. integrator.u = max(0.0, integrator.u)
     end
+    
+    cb = DiscreteCallback(condition, apply_clamp!)
 
-    # Combine extinction with positivity enforcement
-    extinction_cb = DiscreteCallback(condition, apply_extinction!)
-    projection_cb = PositiveDomain()
-    cb = CallbackSet(extinction_cb, projection_cb)
-
-    # Problem setup
     tspan = (0.0, n * Δt)
-    p = (r, K, σ, extinct)
+    p = (r, K, σ)
+    tstops = 0.0:Δt:(n * Δt)
+
     prob = SDEProblem(logistic!, diffusion!, y0, tspan, p)
 
-    # Solve
-    sol = solve(prob, SRIW1(); callback=cb, saveat=skip * Δt)
+    sol = solve(prob, EM(); callback=cb, saveat=skip * Δt, tstops=tstops)#, adaptive=false)
 
-    return Matrix(reduce(hcat, sol.u)')
+    return Matrix(reduce(hcat, sol.u)')[1:end-1,:]
 end
 
 function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
-    # Track which species are extinct
     extinct = falses(S)
 
-    # Deterministic part
     function logistic!(du, u, p, t)
         r, A, σ, extinct = p
         @inbounds for i in 1:S
-            if extinct[i]
-                du[i] = 0.0
-            else
-                du[i] = r * u[i] * (1.0 - dot(view(A, i, :), u))
-            end
+            u_val = max(0.0, u[i])
+            du[i] = extinct[i] ? 0.0 : r * u[i] * (1.0 - dot(view(A, i, :), u))
         end
     end
 
-    # Stochastic part (multiplicative noise)
     function diffusion!(du, u, p, t)
         σ = p[3]
         extinct = p[4]
         @inbounds for i in 1:S
-            du[i] = extinct[i] ? 0.0 : σ * u[i]
+            u_val = max(0.0, u[i])  # Clamp input to avoid negative stochastic pushes
+            du[i] = extinct[i] ? 0.0 : σ * u_val
         end
     end
 
-    # Extinction condition: any new u[i] < ε for non-extinct species
     function condition(u, t, integrator)
         any((u .< ε) .& .!integrator.p[4])
     end
 
-    # Apply extinction: zero out and flag extinct species
     function apply_extinction!(integrator)
         u = integrator.u
         extinct = integrator.p[4]
@@ -103,25 +77,22 @@ function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
                 u[i] = 0.0
                 extinct[i] = true
             elseif u[i] < 0.0
-                u[i] = 0.0  # Clamp negative values too, just in case
+                u[i] = 0.0
             end
         end
     end
 
-    # Combine extinction with positivity enforcement
     extinction_cb = DiscreteCallback(condition, apply_extinction!)
-    projection_cb = PositiveDomain()
-    cb = CallbackSet(extinction_cb, projection_cb)
 
-    # Problem setup
     tspan = (0.0, n * Δt)
     p = (r, A, σ, extinct)
+    tstops = 0.0:Δt:(n * Δt)
+
     prob = SDEProblem(logistic!, diffusion!, y0, tspan, p)
 
-    # Solve
-    sol = solve(prob, SRIW1(); callback=cb, saveat=skip * Δt)
+    sol = solve(prob, EM(); callback=extinction_cb, saveat=skip * Δt, dt=Δt)
 
-    return Matrix(reduce(hcat, sol.u)')
+    return Matrix(reduce(hcat, sol.u)')[1:end-1,:]
 end
 
 function exp_growth(S, y0, Δt, n; σ=1.0, p=0.95, ε=1e-6, skip=1)
@@ -133,13 +104,24 @@ function exp_growth(S, y0, Δt, n; σ=1.0, p=0.95, ε=1e-6, skip=1)
         gamma = abs.(1 .+ rand(Normal(0, σ), S))
         growth = y[i-1,:] .* exp.(log.(gamma) .* Δt)
         intro = zeros(S)
-        if rand() > p
-            intro .+= rand()
-        end
-        y[i,:] = growth .+ intro
-        y[i,:][y[i,:] .< ε] .= 0.0
+        mask = rand(S) .> p
+        intro[mask] .+= rand(Normal(), sum(mask))
+        y[i, :] = growth .+ intro
+        y[i, :] = ifelse.(y[i, :] .< ε, 0.0, y[i, :])
     end
 
+    return y[1:skip:end, :]
+end
+
+function stat_model(S, n; β=1.0, mean_abs=rand(S), ε=1e-6, skip=1)
+
+    θ = mean_abs ./ β
+    y = zeros(n, S)
+    for i in 1:S
+        y[:, i] = rand(Gamma(β, θ[i]), n)
+    end
+    y[y .< ε] .= 0.0
+    
     return y[1:skip:end, :]
 end
 

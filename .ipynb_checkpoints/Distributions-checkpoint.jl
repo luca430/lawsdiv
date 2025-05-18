@@ -57,8 +57,8 @@ function make_Taylor(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name=
     mean_data = [mean(x) for x in non_zero_data]
     var_data = [var(x) for x in non_zero_data]
 
-    bmin = floor(minimum(log.(mean_data)))
-    bmax = ceil(maximum(log.(mean_data)))
+    bmin = minimum(log.(mean_data))
+    bmax = maximum(log.(mean_data))
     binedges = bmin:Δb:bmax
     centers = 0.5 .* (binedges[2:end] .+ binedges[1:end-1])
     yy = [mean(log.(var_data[(log.(mean_data) .>= binedges[i]) .& (log.(mean_data) .< binedges[i+1])])) for i in 1:length(binedges)-1]
@@ -71,14 +71,16 @@ function make_Taylor(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name=
     fit = curve_fit(func, centers, yy, p0)
     p_fit = fit.param
 
-    xmin = centers[1] * (1 + 2 / 100)
-    xmax = centers[end] * (1 - 2 / 100)
-    xarr = floor(xmin):0.05:ceil(xmax)
+    xarr = bmin:Δb:bmax
     fitted_y = func(xarr, p_fit)
 
-    fig = plot(xlabel="log(means)", ylabel="log(variances)", title=plot_title, xrange=(xmin, xmax), legend=:topleft)
+    fig = plot(xlabel="log(means)", ylabel="log(variances)", title=plot_title, legend=:topleft)
     if plot_fig
-        plot!(fig, xarr, fitted_y, color=:black, label="y = $(round(p_fit[1], digits=2))x + $(round(p_fit[2], digits=2))")
+        if p_fit[2] >= 0
+            plot!(fig, xarr, fitted_y, color=:black, label="y = $(round(p_fit[1], digits=2))x + $(round(p_fit[2], digits=2))")
+        else
+            plot!(fig, xarr, fitted_y, color=:black, label="y = $(round(p_fit[1], digits=2))x - $(abs(round(p_fit[2], digits=2)))")
+        end
         scatter!(fig, centers, yy, color=:red, label=data_label)
     end
 
@@ -144,6 +146,29 @@ function make_lagCorr(data; missing_thresh=0, max_lag=Int64(floor(size(data,1) /
     end
 
     return Dict("corrs" => corrs_mat, "mean_corrs" => mean_corrs, "fig" => fig)
+end
+
+function make_lagCrossCorr(data; Δb=0.01, missing_thresh=0, lags=[0], make_log=false, plot_fig=false, save_plot=false, plot_name="crosscorrelation.png", plot_title="cross-correlation")
+
+    fig = plot(xlabel="correlation", title=plot_title)
+    corrs = []
+    if plot_fig
+        for (i, lag) in enumerate(lags)
+            push!(corrs, compute_lagged_crosscorrelations(data, lag; make_log=make_log, missing_thresh=missing_thresh))
+            bmin = -1
+            bmax = 1
+            hist_input = filter(!isnan, corrs[end])
+            fh = FHist.Hist1D(hist_input, binedges=bmin:Δb:bmax) |> FHist.normalize
+            shadow = (length(lags) - i) / length(lags)
+            plot!(fig, fh, label="lag = $lag", alpha=1.0/i, xlabel="cross correlation")
+        end
+    end
+    
+    if save_plot
+        savefig(plot_name)
+    end
+
+    return Dict("cross_corrs" => corrs, "fig" => fig)
 end
 
 function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=nothing, plot_fig=false, save_plot=false, plot_name="PSD.png", plot_title="Power Spectrum Density", data_label="data")
@@ -219,6 +244,16 @@ function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=noth
 end
 
 ### HELPER FUNCTIONS
+# -- Replace 0.0 with `missing` in the data matrix --
+function preprocess_matrix(matrix_data::Matrix{Float64}; make_log::Bool=false)
+    mat = Matrix{Union{Missing, Float64}}(matrix_data)
+    mat[mat .== 0.0] .= missing
+    if make_log
+        mat = passmissing(log).(mat)
+    end
+    return mat
+end
+
 # -- Custom autocorrelation function that skips missing entries at each lag --
 function autocor_skipmissing(x::Union{Vector{Float64}, Vector{Union{Missing, Float64}}}, lag::Int)
     n = length(x)
@@ -241,16 +276,6 @@ function autocor_skipmissing(x::Union{Vector{Float64}, Vector{Union{Missing, Flo
     b = last.(valid_pairs)
 
     return cor(a, b)
-end
-
-# -- Replace 0.0 with `missing` in the data matrix --
-function preprocess_matrix(matrix_data::Matrix{Float64}; make_log::Bool=false)
-    mat = Matrix{Union{Missing, Float64}}(matrix_data)
-    mat[mat .== 0.0] .= missing
-    if make_log
-        mat = passmissing(log).(mat)
-    end
-    return mat
 end
 
 function compute_lagged_autocorrelations(matrix_data::Matrix{Float64}, max_lag::Int64; make_log::Bool=false, missing_thresh::Int64=0)
@@ -282,6 +307,62 @@ function compute_lagged_autocorrelations(matrix_data::Matrix{Float64}, max_lag::
     return mean_corrs, corrs_mat
 end
 
+# -- Custom cross correlation function that skips missing entries at each lag --
+function crosscor_skipmissing(x::Union{Vector{Float64}, Vector{Union{Missing, Float64}}}, 
+                              y::Union{Vector{Float64}, Vector{Union{Missing, Float64}}}, 
+                              lag::Int64)
+    n = min(length(x), length(y))
+
+    if lag == 0
+        vals = [(x[i], y[i]) for i in 1:n if !ismissing(x[i]) && !ismissing(y[i])]
+        if length(vals) < 2
+            return missing
+        end
+        a = first.(vals)
+        b = last.(vals)
+        return cor(a, b)
+    elseif lag > 0
+        x1 = x[1:n - lag]
+        y1 = y[1 + lag:n]
+    else
+        x1 = x[1 - lag:n]
+        y1 = y[1:n + lag]
+    end
+
+    valid_pairs = [(x1[i], y1[i]) for i in 1:length(x1) if !ismissing(x1[i]) && !ismissing(y1[i])]
+
+    if length(valid_pairs) < 2
+        return missing
+    end
+
+    a = first.(valid_pairs)
+    b = last.(valid_pairs)
+
+    return cor(a, b)
+end
+
+function compute_lagged_crosscorrelations(matrix_data::Matrix{Float64}, lag::Int; make_log::Bool=false, missing_thresh::Int=0)
+    mat = preprocess_matrix(matrix_data, make_log=make_log)
+    mask = map(col -> count(!ismissing, col) > missing_thresh, eachcol(mat))
+    filtered_mat = mat[:, mask]
+    S = size(filtered_mat, 2)
+    
+    cross_corr = fill(NaN, S, S)  # Use NaN for undefined entries
+
+    for i in 1:S
+        for j in 1:i
+            if i != j
+                x = filtered_mat[:, i]
+                y = filtered_mat[:, j]
+                val = crosscor_skipmissing(x, y, lag)
+                cross_corr[i, j] = ismissing(val) ? NaN : val
+                cross_corr[j, i] = ismissing(val) ? NaN : val
+            end
+        end
+    end
+
+    return cross_corr
+end
 
 
 end # end module
