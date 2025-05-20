@@ -7,10 +7,14 @@ using Plots, Measures
 using Distributions, SpecialFunctions, LsqFit
 using DataFrames, DataFramesMeta, GLM, Chain
 
-function make_AFD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="AFD.png", plot_title="AFD", data_label="data", xrange=(-5, 5), min_y_range=1e-3)
+function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="AFD.png", plot_title="AFD", data_label="data", xrange=(-5, 5), min_y_range=1e-3)
 
-    S = size(data)[2]
-    non_zero_data = [data[:,i][data[:,i] .> 0.0] for i in 1:S]
+    mat = preprocess_matrix(data, make_log=false)
+    mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
+    filtered_mat = data[:, mask]
+    
+    S = size(filtered_mat)[2]
+    non_zero_data = [filtered_mat[:,i][filtered_mat[:,i] .> 0.0] for i in 1:S]
     rescaled_data = [(x .- mean(x)) ./ std(x) for x in non_zero_data]
     flatten_data = vcat(rescaled_data...)
     log_data = log.(flatten_data[flatten_data .> 0.0])
@@ -49,13 +53,15 @@ function make_AFD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="AF
 
 end
 
-function make_Taylor(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="Taylor.png", plot_title="Taylor's law", data_label="data")
+function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="Taylor.png", plot_title="Taylor's law", data_label="data")
 
-    S = size(data)[2]
-    non_zero_data = [data[:,i][data[:,i] .> 0.0] for i in 1:S]
+    mat = preprocess_matrix(data, make_log=false)
+    mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
+    filtered_mat = mat[:, mask]
     
-    mean_data = [mean(x) for x in non_zero_data]
-    var_data = [var(x) for x in non_zero_data]
+    S = size(filtered_mat)[2]
+    mean_data = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
+    var_data = [var(skipmissing(x)) for x in eachcol(filtered_mat)]
 
     bmin = minimum(log.(mean_data))
     bmax = maximum(log.(mean_data))
@@ -88,15 +94,27 @@ function make_Taylor(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name=
         savefig(plot_name)
     end
 
-    return Dict("hist" => [binedges, yy], "params" => Dict("α" => p_fit[1], "q" => p_fit[2]), "fig" => fig)
+    return Dict("hist" => [centers, yy], "params" => Dict("α" => p_fit[1], "q" => p_fit[2]), "fig" => fig)
 
 end
 
-function make_MAD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="MAD.png", plot_title="MAD", data_label="data", xrange=(-3,3), min_y_range=1e-7)
+function make_MAD(data; ignore_extinction=true, round=false, missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="MAD.png", plot_title="MAD", data_label="data", xrange=(-3,3), min_y_range=1e-7)
 
-    S = size(data)[2]
-    non_zero_data = [data[:,i][data[:,i] .> 0.0] for i in 1:S]
-    log_data = [log(mean(x)) for x in non_zero_data]
+    if round
+        mat = preprocess_matrix(round.(data), make_log=false)
+    else
+        mat = preprocess_matrix(data, make_log=false)
+    end
+    
+    mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
+    if ignore_extinction
+        filtered_mat = mat[:, mask]
+    else
+        filtered_mat = data[:, mask]
+    end
+    
+    S = size(filtered_mat)[2]
+    log_data = [log(mean(skipmissing(x))) for x in eachcol(filtered_mat)]
     
     bmin = floor(minimum(log_data))
     bmax = ceil(maximum(log_data))
@@ -124,11 +142,11 @@ function make_MAD(data; Δb=0.05, plot_fig=false, save_plot=false, plot_name="MA
         savefig(plot_name)
     end
 
-    return Dict("hist" => fh, "fig" => fig)
+    return Dict("hist" => [centers, yy], "fig" => fig)
 
 end
 
-function make_lagCorr(data; missing_thresh=0, max_lag=Int64(floor(size(data,1) / 2)), make_log=false, plot_fig=false, save_plot=false, plot_name="autocorrelation.png", plot_title="autocorrelation", data_label="data")
+function make_lagCorr(data; missing_thresh=size(data, 1), max_lag=Int64(floor(size(data,1) / 2)), make_log=false, plot_fig=false, save_plot=false, plot_name="autocorrelation.png", plot_title="autocorrelation", data_label="data")
 
     mean_corrs, corrs_mat = compute_lagged_autocorrelations(data, max_lag, make_log=make_log, missing_thresh=missing_thresh)
     n_series = size(corrs_mat, 2)
@@ -148,19 +166,19 @@ function make_lagCorr(data; missing_thresh=0, max_lag=Int64(floor(size(data,1) /
     return Dict("corrs" => corrs_mat, "mean_corrs" => mean_corrs, "fig" => fig)
 end
 
-function make_lagCrossCorr(data; Δb=0.01, missing_thresh=0, lags=[0], make_log=false, plot_fig=false, save_plot=false, plot_name="crosscorrelation.png", plot_title="cross-correlation")
+function make_lagCrossCorr(data; Δb=0.01, missing_thresh=size(data, 1), lags=[0], make_log=false, plot_fig=false, save_plot=false, plot_name="crosscorrelation.png", plot_title="cross-correlation")
 
     fig = plot(xlabel="correlation", title=plot_title)
     corrs = []
-    if plot_fig
-        for (i, lag) in enumerate(lags)
-            push!(corrs, compute_lagged_crosscorrelations(data, lag; make_log=make_log, missing_thresh=missing_thresh))
+    for (i, lag) in enumerate(lags)
+        push!(corrs, compute_lagged_crosscorrelations(data, lag; make_log=make_log, missing_thresh=missing_thresh))
+        if plot_fig
             bmin = -1
             bmax = 1
             hist_input = filter(!isnan, corrs[end])
             fh = FHist.Hist1D(hist_input, binedges=bmin:Δb:bmax) |> FHist.normalize
-            shadow = (length(lags) - i) / length(lags)
-            plot!(fig, fh, label="lag = $lag", alpha=1.0/i, xlabel="cross correlation")
+            shadow = (length(lags) - i + 1) / length(lags)
+            plot!(fig, fh, label="lag = $lag", alpha=shadow, xlabel="cross correlation")
         end
     end
     
@@ -171,7 +189,7 @@ function make_lagCrossCorr(data; Δb=0.01, missing_thresh=0, lags=[0], make_log=
     return Dict("cross_corrs" => corrs, "fig" => fig)
 end
 
-function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=nothing, plot_fig=false, save_plot=false, plot_name="PSD.png", plot_title="Power Spectrum Density", data_label="data")
+function make_PSD(data; Δt=1, missing_thresh=size(data, 1), make_log=false, freq_range=nothing, plot_fig=false, save_plot=false, plot_name="PSD.png", plot_title="Power Spectrum Density", data_label="data")
     mat = preprocess_matrix(data, make_log=make_log)
     if size(mat,1) % 2 != 0
         mat = mat[2:end,:]
@@ -187,7 +205,7 @@ function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=noth
     otu_count = 0 # Needed for normalization
     for i in 1:N_species
         # Compute non-uniform FFT only for a 'sufficient' number of samples
-        if count(.!ismissing.(mat[:,i])) > missing_thresh
+        if count(ismissing.(mat[:,i])) <= missing_thresh
             otu_count += 1
             
             x = mat[:,i][.!ismissing.(mat[:,i])]
@@ -215,12 +233,15 @@ function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=noth
 
     if !isnothing(freq_range)
         mask = (log_f .>= freq_range[1]) .& (log_f .<= freq_range[2])
-        log_f = log_f[mask]
-        log_S = log_S[mask]
+        log_f_fit = log_f[mask]
+        log_S_fit = log_S[mask]
+    else
+        log_f_fit = log_f
+        log_S_fit = log_S
     end
     
     # Put into a DataFrame and fit linear model: log_S ~ log_k
-    plot_df = DataFrame(log_f=log_f, log_S=log_S)
+    plot_df = DataFrame(log_f=log_f_fit, log_S=log_S_fit)
     model = lm(@formula(log_S ~ log_f), plot_df)
     
     # Extract the slope and intercept
@@ -231,7 +252,7 @@ function make_PSD(data; Δt=1, missing_thresh=0, make_log=false, freq_range=noth
     fig = plot(xlabel="log₁₀(frequency)", ylabel="log₁₀(power)", legend=:bottomleft, title=plot_title)
     if plot_fig
         plot!(fig, log_f, log_S, label=data_label, color="black")
-        plot!(fig, log_f, predict(model), label="Fit: slope = $(round(slope, digits=2))", lw=2, color="red")
+        plot!(fig, log_f_fit, predict(model), label="Fit: slope = $(round(slope, digits=2))", lw=2, color="red")
     end
 
     if save_plot
@@ -278,14 +299,14 @@ function autocor_skipmissing(x::Union{Vector{Float64}, Vector{Union{Missing, Flo
     return cor(a, b)
 end
 
-function compute_lagged_autocorrelations(matrix_data::Matrix{Float64}, max_lag::Int64; make_log::Bool=false, missing_thresh::Int64=0)
+function compute_lagged_autocorrelations(matrix_data::Matrix{Float64}, max_lag::Int64; make_log::Bool=false, missing_thresh::Int64=size(matrix_data, 1))
     mat = preprocess_matrix(matrix_data, make_log=make_log)
 
     corrs = Vector{Vector{Union{Missing, Float64}}}()
 
     for i in 1:size(mat, 2)
         x = mat[:, i]
-        if count(.!ismissing.(x)) > missing_thresh
+        if count(ismissing.(x)) <= missing_thresh
             c = Vector{Union{Missing, Float64}}()
             for lag in 0:max_lag
                 r = autocor_skipmissing(x, lag)
@@ -341,9 +362,9 @@ function crosscor_skipmissing(x::Union{Vector{Float64}, Vector{Union{Missing, Fl
     return cor(a, b)
 end
 
-function compute_lagged_crosscorrelations(matrix_data::Matrix{Float64}, lag::Int; make_log::Bool=false, missing_thresh::Int=0)
+function compute_lagged_crosscorrelations(matrix_data::Matrix{Float64}, lag::Int; make_log::Bool=false, missing_thresh::Int64=size(matrix_data, 1))
     mat = preprocess_matrix(matrix_data, make_log=make_log)
-    mask = map(col -> count(!ismissing, col) > missing_thresh, eachcol(mat))
+    mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = mat[:, mask]
     S = size(filtered_mat, 2)
     
