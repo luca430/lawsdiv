@@ -46,13 +46,14 @@ function logistic_growth(S, y0, Δt, n; r=1.0, K=ones(S), σ=1.0, ε=1e-6, skip=
 end
 
 function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
+
     extinct = falses(S)
 
     function logistic!(du, u, p, t)
         r, A, σ, extinct = p
+        u_val = [max(0.0, u[i]) for i in 1:S]
         @inbounds for i in 1:S
-            u_val = max(0.0, u[i])
-            du[i] = extinct[i] ? 0.0 : r * u[i] * (1.0 - dot(view(A, i, :), u))
+            du[i] = extinct[i] ? 0.0 : r * u_val[i] * (1.0 + dot(view(A, i, :), u_val))
         end
     end
 
@@ -60,15 +61,17 @@ function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
         σ = p[3]
         extinct = p[4]
         @inbounds for i in 1:S
-            u_val = max(0.0, u[i])  # Clamp input to avoid negative stochastic pushes
+            u_val = max(0.0, u[i])
             du[i] = extinct[i] ? 0.0 : σ * u_val
         end
     end
 
+    # Extinction condition: fire when anything < ε and not already extinct
     function condition(u, t, integrator)
         any((u .< ε) .& .!integrator.p[4])
     end
 
+    # Apply extinction + clamp
     function apply_extinction!(integrator)
         u = integrator.u
         extinct = integrator.p[4]
@@ -76,24 +79,30 @@ function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
             if u[i] < ε
                 u[i] = 0.0
                 extinct[i] = true
-            elseif u[i] < 0.0
-                u[i] = 0.0
             end
         end
     end
 
     extinction_cb = DiscreteCallback(condition, apply_extinction!)
 
+    # Positivity projection at every step
+    function project_positivity!(integrator)
+        @. integrator.u = max(integrator.u, 0.0)
+    end
+
+    positivity_cb = DiscreteCallback((u, t, integrator) -> true, project_positivity!; save_positions=(false, false))
+
+    cb = CallbackSet(extinction_cb, positivity_cb)
+
     tspan = (0.0, n * Δt)
     p = (r, A, σ, extinct)
-    tstops = 0.0:Δt:(n * Δt)
-
     prob = SDEProblem(logistic!, diffusion!, y0, tspan, p)
+    
+    sol = solve(prob, SOSRI(); callback=cb, saveat=skip * Δt, dt=Δt)
 
-    sol = solve(prob, EM(); callback=extinction_cb, saveat=skip * Δt, dt=Δt)
-
-    return Matrix(reduce(hcat, sol.u)')[1:end-1,:]
+    return Matrix(reduce(hcat, sol.u)')[1:end-1, :]
 end
+
 
 function exp_growth(S, y0, Δt, n; σ=1.0, p=0.95, ε=1e-6, skip=1)
 
@@ -126,35 +135,22 @@ function stat_model(S, n; β=1.0, mean_abs=rand(S), ε=1e-6, skip=1)
 end
 
 ### HELPER FUNCTIONS
-function sparse_gaussian_matrix(K::Vector{Float64}, sparsity; μ=-1.0, σ=0.5, rng=Random.default_rng())
+function sparse_gaussian_matrix(K::Vector{Float64}, sparsity; μ=-1.0, σ=0.5)
 
     S = length(K)
-    D = Diagonal(K)
-    J = zeros(S, S)
+    A = zeros(S,S)
 
     for i in 1:S
+        A[i,i] = - 1 / K[i]
         for j in 1:S
-            if i == j
-                # Diagonal: ensure negative real part (self-regulation)
-                J[i, j] = -abs(μ + σ * randn(rng))
-            elseif rand(rng) < sparsity
+            if (i != j) & (rand() < sparsity)
                 # Off-diagonal: asymmetric interaction
-                J[i, j] = μ + σ * randn(rng)
+                A[i, j] = μ + σ * randn()
             end
         end
     end
 
-    # Now recover A = - D^{-1} * J
-    A = -inv(D) * J
-
-    # Adjust diagonal to enforce A * K = 1
-    # (This ensures K is an equilibrium after conversion)
-    for i in 1:S
-        A[i, i] = (1.0 - sum(A[i, :] .* K)) / K[i]
-    end
-
     return sparse(A)
 end
-
 
 end
