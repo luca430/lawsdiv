@@ -134,6 +134,20 @@ function stat_model(S, n; β=1.0, mean_abs=rand(S), ε=1e-6, skip=1)
     return y[1:skip:end, :]
 end
 
+function OU_exp_growth(S, y0, Δt, n; σ=1.0, ε=1e-6, skip=1)
+
+    S, n = Int64(S), Int64(n)
+    y = zeros(n,S)
+    y[1,:] .= y0
+    for i in 2:n
+        gamma = abs.(rand(Normal(1,σ), S))
+        y[i,:] = y[i-1,:] .* exp.(gamma .* Δt)
+        y[i, :] = ifelse.(y[i, :] .< ε, 0.0, y[i, :])
+    end
+
+    return y[1:skip:end, :]
+end
+
 ### HELPER FUNCTIONS
 function sparse_gaussian_matrix(K::Vector{Float64}, sparsity; μ=-1.0, σ=0.5)
 

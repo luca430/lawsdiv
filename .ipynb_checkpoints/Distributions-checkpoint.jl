@@ -16,7 +16,7 @@ function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, 
     S = size(filtered_mat)[2]
     non_zero_data = [filtered_mat[:,i][filtered_mat[:,i] .> 0.0] for i in 1:S]
     rescaled_data = [(x .- mean(x)) ./ std(x) for x in non_zero_data]
-    flatten_data = vcat(rescaled_data...)
+    flatten_data = filter(!isnan, vcat(rescaled_data...))
     log_data = log.(flatten_data[flatten_data .> 0.0])
     μ_x = mean(flatten_data[flatten_data .> 0.0])
     σ_x = std(flatten_data[flatten_data .> 0.0])
@@ -113,17 +113,20 @@ function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data,
     
     means = [mean(skipmissing(x)) for x in eachcol(filtered_mat)] # Array of mean abundances
     log_data = [log(x) for x in means[means .> c]] # Log of abundances bigger than cutoff
-
-    # parameters
-    m1 = mean(log_data)
-    m2 = mean(log_data.^2)
-    μ_c, σ_c = compute_MAD_params(m1, m2, c)
     
     bmin = floor(minimum(log_data))
     bmax = ceil(maximum(log_data))
     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
     
     # Renormalize the histogram and shift the centers
+    m1 = mean(log_data)
+    m2 = mean(log_data.^2)
+    if c != 0.0
+        μ_c, σ_c = compute_MAD_params(m1, m2, c)
+    else
+        μ_c, σ_c = mean(fh), std(fh)
+    end
+    
     centers = bincenters(fh)
     centers .-= μ_c
     centers ./= sqrt(2 * σ_c^2)
