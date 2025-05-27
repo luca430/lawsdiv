@@ -1,23 +1,23 @@
-module PlotDistributions
+module MakeDistributions
 
 using Statistics, StatsBase
 using NFFT, NLsolve
 using FHist
-using Plots, Measures
 using Distributions, SpecialFunctions, LsqFit
 using DataFrames, DataFramesMeta, GLM, Chain
 
-function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="AFD.png", plot_title="AFD", data_label="data", xrange=(-5, 5), min_y_range=1e-3)
+function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = data[:, mask]
-    
-    S = size(filtered_mat)[2]
-    non_zero_data = [filtered_mat[:,i][filtered_mat[:,i] .> 0.0] for i in 1:S]
+
+    S = size(filtered_mat, 2)
+    non_zero_data = [filtered_mat[:, i][filtered_mat[:, i] .> 0.0] for i in 1:S]
     rescaled_data = [(x .- mean(x)) ./ std(x) for x in non_zero_data]
     flatten_data = filter(!isnan, vcat(rescaled_data...))
     log_data = log.(flatten_data[flatten_data .> 0.0])
+
     μ_x = mean(flatten_data[flatten_data .> 0.0])
     σ_x = std(flatten_data[flatten_data .> 0.0])
     β = μ_x^2 / σ_x^2
@@ -25,231 +25,137 @@ function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, 
     bmin = round(minimum(log_data))
     bmax = round(maximum(log_data))
     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
-    
-    # Renormalize the histogram and shift the centers
-    μ, σ = mean(fh), std(fh)
+
+    μ = mean(fh)
+    σ = std(fh)
     centers = bincenters(fh)
     centers .-= μ
     centers ./= sqrt(2 * σ^2)
     norm_counts = bincounts(fh) ./ (integral(fh) * Δb)
-    yy = [10^log(norm_counts[norm_counts.>0.0][i]) for i in eachindex(norm_counts[norm_counts.>0.0])]
-    centers = centers[norm_counts.>0.0]
-    
+
+    # Filter non-zero counts
+    valid = norm_counts .> 0.0
+    yy = 10 .^ log.(norm_counts[valid])
+    centers = centers[valid]
+
+    # Theoretical Gamma distribution
     xarr = -3.0:0.05:2
-    g_gamma = [10^(β*x - μ_x/σ_x^2*exp(x) - loggamma(β) + β*log(μ_x/σ_x^2)) for x in (xarr .* sqrt(2 * σ^2) .+ μ)] # Grilli's Gamma distribution
+    g_gamma = [10^(β * x - μ_x / σ_x^2 * exp(x) - loggamma(β) + β * log(μ_x / σ_x^2))
+               for x in (xarr .* sqrt(2 * σ^2) .+ μ)]
 
-
-    fig = plot(yscale=:log10, xlabel="log(abundances)", ylabel="pdf", title=plot_title, yrange=(min_y_range, 1), xrange=xrange, legend=:topleft)
-    if plot_fig
-        plot!(fig, xarr, g_gamma, color=:black, label="Gamma(β = $(round(β, digits=3)))")
-        scatter!(fig, centers, yy, color=:red, label=data_label)
-    end
-
-    if save_plot
-        savefig(plot_name)
-    end
-
-    return Dict("hist" => [centers, yy], "hparams" => Dict("μ" => μ, "σ" => σ), "params" => Dict("β" => β, "μ_x" => μ_x, "σ_x" => σ_x), "fig" => fig)
-
+    return Dict(
+        "hist" => [centers, yy],
+        "hparams" => Dict("μ" => μ, "σ" => σ),
+        "params" => Dict("β" => β, "μ_x" => μ_x, "σ_x" => σ_x),
+        "env" => env
+    )
 end
 
-function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="Taylor.png", plot_title="Taylor's law", data_label="data")
+function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = mat[:, mask]
-    
-    S = size(filtered_mat)[2]
+
     mean_data = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
     var_data = [var(skipmissing(x)) for x in eachcol(filtered_mat)]
 
-    bmin = minimum(log.(mean_data))
-    bmax = maximum(log.(mean_data))
+    log_mean = log.(mean_data)
+    log_var = log.(var_data)
+
+    bmin = minimum(log_mean)
+    bmax = maximum(log_mean)
     binedges = bmin:Δb:bmax
     centers = 0.5 .* (binedges[2:end] .+ binedges[1:end-1])
-    yy = [mean(log.(var_data[(log.(mean_data) .>= binedges[i]) .& (log.(mean_data) .< binedges[i+1])])) for i in 1:length(binedges)-1]
+
+    yy = [mean(log_var[(log_mean .>= binedges[i]) .& (log_mean .< binedges[i+1])]) for i in 1:length(binedges)-1]
     centers = centers[isfinite.(yy)]
     yy = yy[isfinite.(yy)]
 
-    # Fit data to find Taylor's exponent
+    # Fit linear model y = αx + q
     func(x, p) = p[1] .* x .+ p[2]
-    p0 = [2.0, 0.0]  # Initial guess for the parameters
+    p0 = [2.0, 0.0]
     fit = curve_fit(func, centers, yy, p0)
     p_fit = fit.param
 
-    xarr = bmin:Δb:bmax
-    fitted_y = func(xarr, p_fit)
-
-    fig = plot(xlabel="log(means)", ylabel="log(variances)", title=plot_title, legend=:topleft)
-    if plot_fig
-        if p_fit[2] >= 0
-            plot!(fig, xarr, fitted_y, color=:black, label="y = $(round(p_fit[1], digits=2))x + $(round(p_fit[2], digits=2))")
-        else
-            plot!(fig, xarr, fitted_y, color=:black, label="y = $(round(p_fit[1], digits=2))x - $(abs(round(p_fit[2], digits=2)))")
-        end
-        scatter!(fig, centers, yy, color=:red, label=data_label)
-    end
-
-    if save_plot
-        savefig(plot_name)
-    end
-
-    return Dict("hist" => [centers, yy], "params" => Dict("α" => p_fit[1], "q" => p_fit[2]), "fig" => fig)
-
+    return Dict(
+        "hist" => [centers, yy],
+        "params" => Dict("α" => p_fit[1], "q" => p_fit[2]),
+        "env" => env
+    )
 end
 
-function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="MAD.png", plot_title="MAD", data_label="data", xrange=(-3,3), min_y_range=1e-7)
+function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data, 1), Δb=0.05,
+                  env=nothing)
 
-    mat = preprocess_matrix(data, make_log=false) # convert zeros into missing data
+    mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
-    if ignore_extinction
-        filtered_mat = mat[:, mask] # discard species with mostly missing entries and don't count zeros in future analysis
-    else
-        filtered_mat = data[:, mask] # discard species with mostly missing entries and count zeros in future analysis
-    end
 
-    mask = .!map(col -> count(ismissing, col) == size(filtered_mat,1), eachcol(filtered_mat))
-    filtered_mat = filtered_mat[:, mask] # Discard species that are never present after first filtering
-    
-    means = [mean(skipmissing(x)) for x in eachcol(filtered_mat)] # Array of mean abundances
-    log_data = [log(x) for x in means[means .> c]] # Log of abundances bigger than cutoff
-    
+    filtered_mat = ignore_extinction ? mat[:, mask] : data[:, mask]
+
+    # Remove species that are never present
+    mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
+    filtered_mat = filtered_mat[:, mask]
+
+    means = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
+    log_data = [log(x) for x in means if x > c]
+
     bmin = floor(minimum(log_data))
     bmax = ceil(maximum(log_data))
     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
-    
-    # Renormalize the histogram and shift the centers
+
     m1 = mean(log_data)
-    m2 = mean(log_data.^2)
+    m2 = mean(log_data .^ 2)
+
     if c != 0.0
         μ_c, σ_c = compute_MAD_params(m1, m2, c)
     else
         μ_c, σ_c = mean(fh), std(fh)
     end
-    
+
     centers = bincenters(fh)
     centers .-= μ_c
     centers ./= sqrt(2 * σ_c^2)
+
     norm_counts = bincounts(fh) ./ (integral(fh) * Δb)
-    erfc_arg = (log(c) - μ_c) / (sqrt(2 * σ_c^2))
-    yy = [10^log(norm_counts[norm_counts.>0.0][i] / sqrt(2 / (π*σ_c^2)) * erfc(erfc_arg)) for i in eachindex(norm_counts[norm_counts.>0.0])]
-    centers = centers[norm_counts.>0.0]
-    
-    xarr = -3.0:0.05:3.0
-    lognorm = [10^(-x^2) for x in xarr] # Gaussian distribution
+    valid = norm_counts .> 0.0
+    erfc_arg = (log(c) - μ_c) / sqrt(2 * σ_c^2)
+    yy = 10 .^ log.((norm_counts[valid]) ./ sqrt(2 / (π * σ_c^2)) .* erfc(erfc_arg))
+    centers = centers[valid]
 
-    fig = plot(yscale=:log10, xlabel="log(abundances)", ylabel="pdf", title=plot_title, yrange=(min_y_range, 5), legend=:topleft)
-    if plot_fig
-        plot!(fig, xarr, lognorm, color=:black, label="Lognormal")
-        scatter!(fig, centers, yy, color=:red, label=data_label)
-        vline!(fig, [(log(c) - μ_c) / sqrt(2 * σ_c^2)], ls=:dash, c="red", lw=1.5, label=nothing)
-    end
-
-    if save_plot
-        savefig(plot_name)
-    end
-
-    return Dict("hist" => [centers, yy], "fig" => fig)
-
+    return Dict(
+        "hist" => [centers, yy],
+        "cutoff" => c,
+        "hparams" => Dict("μ_c" => μ_c, "σ_c" => σ_c),
+        "env" => env
+        )
 end
 
-# function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data, 1), Δb=0.05, plot_fig=false, save_plot=false, plot_name="MAD.png", plot_title="MAD", data_label="data", xrange=(-3,3), min_y_range=1e-7)
+function make_lagCorr(data;
+                      missing_thresh = size(data, 1),
+                      max_lag = Int(floor(size(data, 1) / 2)),
+                      make_log = false, env=nothing)
 
-#     mat = preprocess_matrix(data, make_log=false) # convert zeros into missing data
-#     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
-#     if ignore_extinction
-#         filtered_mat = mat[:, mask] # discard species with mostly missing entries and don't count zeros in future analysis
-#     else
-#         filtered_mat = data[:, mask] # discard species with mostly missing entries and count zeros in future analysis
-#     end
+    mean_corrs, corrs_mat = compute_lagged_autocorrelations(data, max_lag;
+                                                             make_log = make_log,
+                                                             missing_thresh = missing_thresh)
 
-#     mask = .!map(col -> count(ismissing, col) == size(filtered_mat,1), eachcol(filtered_mat))
-#     filtered_mat = filtered_mat[:, mask] # Discard species that are never present after first filtering
-    
-#     means = [mean(skipmissing(x)) for x in eachcol(filtered_mat)] # Array of mean abundances
-#     log_data = [log(x) for x in means[means .> c]] # Log of abundances bigger than cutoff
-#     m1 = mean(log_data)
-#     m2 = mean(log_data.^2)
-    
-#     bmin = floor(minimum(log_data))
-#     bmax = ceil(maximum(log_data))
-#     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
-    
-#     # Renormalize the histogram and shift the centers
-#     μ, σ = mean(fh), std(fh)
-#     println(σ)
-#     centers = bincenters(fh)
-#     # centers .-= μ
-#     # centers ./= sqrt(2 * σ^2)
-#     norm_counts = bincounts(fh) ./ (integral(fh) * Δb)
-#     yy = [10^log(norm_counts[norm_counts.>0.0][i]) for i in eachindex(norm_counts[norm_counts.>0.0])]
-#     centers = centers[norm_counts.>0.0]
-    
-#     xarr = -25.0:0.05:0.0
-#     # σ = sqrt(-m1*μ - log(c)*m1 + μ*log(c) + m2)
-#     # println(σ)
-#     # lognorm = [10^(-(x - μ)^2 / (2*σ^2) - log(m1 * exp((log(c) - μ)^2 / (2*σ^2)) / σ^2 - μ)) for x in xarr] # Gaussian distribution
-#     lognorm = [10^(-(x - μ)^2 / (2*σ^2) + log(sqrt(2 / (π * σ^2)) / erfc((log(c) - μ) / sqrt(2 * σ^2)))) for x in xarr] # Gaussian distribution
-
-#     fig = plot(yscale=:log10, xlabel="log(abundances)", ylabel="pdf", title=plot_title, yrange=(min_y_range, 5), legend=:topleft)
-#     if plot_fig
-#         plot!(fig, xarr, lognorm, color=:black, label="Lognormal")
-#         scatter!(fig, centers, yy, color=:red, label=data_label)
-#         vline!(fig, [log(c)], ls=:dash, c="red", lw=1.5, label=nothing)
-#     end
-
-#     if save_plot
-#         savefig(plot_name)
-#     end
-
-#     return Dict("hist" => [centers, yy], "fig" => fig)
-
-# end
-
-function make_lagCorr(data; missing_thresh=size(data, 1), max_lag=Int64(floor(size(data,1) / 2)), make_log=false, plot_fig=false, save_plot=false, plot_name="autocorrelation.png", plot_title="autocorrelation", data_label="data")
-
-    mean_corrs, corrs_mat = compute_lagged_autocorrelations(data, max_lag, make_log=make_log, missing_thresh=missing_thresh)
-    n_series = size(corrs_mat, 2)
-    
-    fig = plot(xlabel="lag", ylabel="autocorrelation", title=plot_title)
-    if plot_fig
-        for i in 1:n_series
-            plot!(fig, corrs_mat[:, i], label=nothing, color="lightgrey", lw=0.2)
-        end
-        plot!(fig, mean_corrs, color="red", lw=2, label=data_label)
-    end
-
-    if save_plot
-        savefig(plot_name)
-    end
-
-    return Dict("corrs" => corrs_mat, "mean_corrs" => mean_corrs, "fig" => fig)
+    return Dict("corrs" => corrs_mat, "mean_corrs" => mean_corrs, "max_lag" => max_lag, "env" => env)
 end
 
-function make_lagCrossCorr(data; Δb=0.01, missing_thresh=size(data, 1), lags=[0], make_log=false, plot_fig=false, save_plot=false, plot_name="crosscorrelation.png", plot_title="cross-correlation")
+function make_lagCrossCorr(data; Δb = 0.01, missing_thresh = size(data, 1), lags = [0], make_log = false, env = nothing)
 
-    fig = plot(xlabel="correlation", title=plot_title)
     corrs = []
-    for (i, lag) in enumerate(lags)
-        push!(corrs, compute_lagged_crosscorrelations(data, lag; make_log=make_log, missing_thresh=missing_thresh))
-        if plot_fig
-            bmin = -1
-            bmax = 1
-            hist_input = filter(!isnan, corrs[end])
-            fh = FHist.Hist1D(hist_input, binedges=bmin:Δb:bmax) |> FHist.normalize
-            shadow = (length(lags) - i + 1) / length(lags)
-            plot!(fig, fh, label="lag = $lag", alpha=shadow, xlabel="cross correlation")
-        end
-    end
-    
-    if save_plot
-        savefig(plot_name)
+
+    for lag in lags
+        cmat = compute_lagged_crosscorrelations(data, lag; make_log = make_log, missing_thresh = missing_thresh)
+        push!(corrs, cmat)
     end
 
-    return Dict("cross_corrs" => corrs, "fig" => fig)
+    return Dict("cross_corrs" => corrs, "lags" => lags, "env" => env)
 end
 
-function make_PSD(data; Δt=1, missing_thresh=size(data, 1), make_log=false, freq_range=nothing, plot_fig=false, save_plot=false, plot_name="PSD.png", plot_title="Power Spectrum Density", data_label="data")
+function make_PSD(data; Δt=1, missing_thresh=size(data, 1), make_log=false, freq_range=nothing, env=nothing)
     mat = preprocess_matrix(data, make_log=make_log)
     if size(mat,1) % 2 != 0
         mat = mat[2:end,:]
@@ -309,19 +215,7 @@ function make_PSD(data; Δt=1, missing_thresh=size(data, 1), make_log=false, fre
     slope = coeffs[2]
     intercept = coeffs[1]
 
-    fig = plot(xlabel="log₁₀(frequency)", ylabel="log₁₀(power)", legend=:bottomleft, title=plot_title)
-    if plot_fig
-        plot!(fig, log_f, log_S, label=data_label, color="black")
-        plot!(fig, log_f_fit, predict(model), label="Fit: slope = $(round(slope, digits=2))", lw=2, color="red")
-    end
-
-    if save_plot
-        savefig(plot_name)
-    end
-
-    return Dict("PSD" => [frequencies, mean_S], "params" => Dict("slope" => slope, "intercept" => intercept), "fig" => fig)
-    
-    return 
+    return Dict("PSD" => [frequencies, mean_S], "params" => Dict("slope" => slope, "intercept" => intercept), "env" => env)
 end
 
 ### HELPER FUNCTIONS

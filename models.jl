@@ -134,18 +134,21 @@ function stat_model(S, n; β=1.0, mean_abs=rand(S), ε=1e-6, skip=1)
     return y[1:skip:end, :]
 end
 
-function OU_exp_growth(S, y0, Δt, n; σ=1.0, ε=1e-6, skip=1)
+function OU_growth(S, y0, Δt, n; σ=1.0, ε=1e-6, skip=1)
+    
+    Y = zeros(n, S)
+    Y[1, :] = y0
+    r_dist = Normal(0.0, σ)
 
-    S, n = Int64(S), Int64(n)
-    y = zeros(n,S)
-    y[1,:] .= y0
-    for i in 2:n
-        gamma = abs.(rand(Normal(1,σ), S))
-        y[i,:] = y[i-1,:] .* exp.(gamma .* Δt)
-        y[i, :] = ifelse.(y[i, :] .< ε, 0.0, y[i, :])
+    for t in 2:n
+        r = rand(r_dist, S)
+        dy = -r .* (Y[t-1, :] .- 1.0)
+        y_new = Y[t-1, :] + Δt .* dy
+        Y[t, :] = project_to_simplex(y_new)
+        Y[t, :][Y[t, :] .< ε] .= 0.0
     end
 
-    return y[1:skip:end, :]
+    return Y[1:skip:end, :]
 end
 
 ### HELPER FUNCTIONS
@@ -165,6 +168,15 @@ function sparse_gaussian_matrix(K::Vector{Float64}, sparsity; μ=-1.0, σ=0.5)
     end
 
     return sparse(A)
+end
+
+# Project vector onto the probability simplex
+function project_to_simplex(v::Vector{Float64})
+    u = sort(v, rev=true)
+    cssv = cumsum(u) .- 1
+    ind = findlast(i -> u[i] > cssv[i] / i, 1:length(u))
+    θ = cssv[ind] / ind
+    return max.(v .- θ, 0.0)
 end
 
 end
