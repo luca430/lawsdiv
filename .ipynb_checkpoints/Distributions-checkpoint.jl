@@ -12,6 +12,10 @@ function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = data[:, mask]
 
+    # Remove species that are never present
+    mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
+    filtered_mat = filtered_mat[:, mask]
+
     S = size(filtered_mat, 2)
     non_zero_data = [filtered_mat[:, i][filtered_mat[:, i] .> 0.0] for i in 1:S]
     rescaled_data = [(x .- mean(x)) ./ std(x) for x in non_zero_data]
@@ -56,6 +60,10 @@ function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = mat[:, mask]
+
+    # Remove species that are never present
+    mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
+    filtered_mat = filtered_mat[:, mask]
 
     mean_data = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
     var_data = [var(skipmissing(x)) for x in eachcol(filtered_mat)]
@@ -126,7 +134,7 @@ function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data,
     return Dict(
         "hist" => [centers, yy],
         "cutoff" => c,
-        "hparams" => Dict("μ_c" => μ_c, "σ_c" => σ_c),
+        "hparams" => Dict("μ" => μ_c, "σ" => σ_c),
         "env" => env
         )
 end
@@ -215,7 +223,12 @@ function make_PSD(data; Δt=1, missing_thresh=size(data, 1), make_log=false, fre
     slope = coeffs[2]
     intercept = coeffs[1]
 
-    return Dict("PSD" => [frequencies, mean_S], "params" => Dict("slope" => slope, "intercept" => intercept), "env" => env)
+    # standard errors
+    se_vec = stderror(model)
+    se_intercept = se_vec[1]
+    se_slope = se_vec[2]
+
+    return Dict("PSD" => [frequencies, mean_S], "params" => Dict("slope" => (slope, se_slope), "intercept" => (intercept, se_intercept)), "frange" => freq_range, "env" => env)
 end
 
 ### HELPER FUNCTIONS

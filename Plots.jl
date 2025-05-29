@@ -3,8 +3,8 @@ module Plots
 using Statistics, StatsBase, SpecialFunctions
 using CairoMakie, FHist
 
-function combine_AFD_histograms(AFDs; nrows=2, ncols=4, size=(1200, 600), savepath=nothing)
-    fig = Figure(size=size, fontsize = 18)
+function combine_AFD_histograms(AFDs; nrows=2, ncols=4, fig_size=(1200, 600), data_label=nothing, savepath=nothing)
+    fig = Figure(size=fig_size, fontsize = 18)
     colors = Makie.wong_colors()
 
     for (i, afd) in enumerate(AFDs)
@@ -33,10 +33,10 @@ function combine_AFD_histograms(AFDs; nrows=2, ncols=4, size=(1200, 600), savepa
         scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15)
         legend_entries = [lineplot, scatterplot]
         # Legend(fig[row, col], ax, tellwidth=false, halign=:right, valign=:top)
-        Legend(fig[row, col], legend_entries, ["Gamma(β = $(round(β, digits=2)))", "Data"];
+        Legend(fig[row, col], legend_entries, ["Gamma(β = $(round(β, digits=2)))", data_label];
             tellwidth = false,
             patchsize = (8, 8),
-            labelsize = 14,
+            labelsize = 18,
             framevisible = false,
             halign=:left,
             valign=:top)
@@ -49,15 +49,15 @@ function combine_AFD_histograms(AFDs; nrows=2, ncols=4, size=(1200, 600), savepa
     return fig
 end
 
-function combine_Taylor_histograms(TAYLORs; nrows=2, ncols=4, size=(1200, 600), savepath=nothing)
-    fig = Figure(size=size, fontsize = 18)
+function combine_Taylor_histograms(TAYLORs; nrows=2, ncols=4, fig_size=(1200, 600), data_label=nothing, savepath=nothing)
+    fig = Figure(size=fig_size, fontsize = 18)
     colors = Makie.wong_colors()
 
     for (i, taylor) in enumerate(TAYLORs)
         # Set figure
         row = div(i - 1, ncols) + 1
         col = mod(i - 1, ncols) + 1
-        ax = Axis(fig[row, col], xlabel="log(μ)", ylabel="log(σ)", title=taylor["env"])
+        ax = Axis(fig[row, col], xlabel = "log(μ)", ylabel = "log(σ²)", title=taylor["env"])
 
         # Extract params
         centers, yy = taylor["hist"]
@@ -76,10 +76,10 @@ function combine_Taylor_histograms(TAYLORs; nrows=2, ncols=4, size=(1200, 600), 
         lineplot = lines!(ax, xarr, fitted_y, color=:black, linewidth=1.5)
         scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15)
         legend_entries = [lineplot, scatterplot]
-        Legend(fig[row, col], legend_entries, [label, "Data"];
+        Legend(fig[row, col], legend_entries, [label, data_label];
             tellwidth = false,
             patchsize = (8, 8),
-            labelsize = 14,
+            labelsize = 18,
             framevisible = false,
             halign=:left,
             valign=:top)
@@ -92,8 +92,8 @@ function combine_Taylor_histograms(TAYLORs; nrows=2, ncols=4, size=(1200, 600), 
     return fig
 end
 
-function combine_MAD_histograms(MADs; nrows=2, ncols=4, size=(1200, 600), savepath=nothing)
-    fig = Figure(size=size, fontsize = 18)
+function combine_MAD_histograms(MADs; nrows=2, ncols=4, fig_size=(1200, 600), data_label=nothing, savepath=nothing)
+    fig = Figure(size=fig_size, fontsize = 18)
     colors = Makie.wong_colors()
 
     for (i, mad) in enumerate(MADs)
@@ -105,8 +105,8 @@ function combine_MAD_histograms(MADs; nrows=2, ncols=4, size=(1200, 600), savepa
 
         # Extract params
         centers, yy = mad["hist"]
-        μ_c = mad["hparams"]["μ_c"]
-        σ_c = mad["hparams"]["σ_c"]
+        μ_c = mad["hparams"]["μ"]
+        σ_c = mad["hparams"]["σ"]
         c = mad["cutoff"]
         env = mad["env"]
         
@@ -130,10 +130,10 @@ function combine_MAD_histograms(MADs; nrows=2, ncols=4, size=(1200, 600), savepa
 
         # Add legend
         legend_entries = [lineplot, scatterplot]
-        Legend(fig[row, col], legend_entries, ["Lognormal", "Data"];
+        Legend(fig[row, col], legend_entries, ["Lognormal", data_label];
             tellwidth = false,
             patchsize = (8, 8),
-            labelsize = 14,
+            labelsize = 18,
             framevisible = false,
             halign=:left,
             valign=:top)
@@ -171,19 +171,11 @@ function combine_autocorr_plots(AutoCorrs; nrows=2, ncols=4, fig_size=(1200, 600
             push!(contour_lines, line)
         end
 
+        # Add horizontal line at y = 0.0
+        hlines!(ax, [0.0]; color=:black, linestyle=:dash, linewidth=1.5)
+
         # Plot mean autocorrelation
         mean_line = lines!(ax, lags, vec(corr["mean_corrs"]); color=colors[mod1(i, length(colors))], linewidth = 2)
-
-        # Legend
-        Legend(fig[row, col],
-               vcat(contour_lines[end], mean_line),  # Show one gray trace, not all
-               [nothing, "mean"];
-               tellwidth = false,
-               patchsize = (8, 8),
-               labelsize = 14,
-               framevisible = false,
-               halign = :right,
-               valign = :top)
     end
 
     if !isnothing(savepath)
@@ -210,18 +202,25 @@ function combine_PSD_plots(PSDs; nrows=2, ncols=4, fig_size=(1200, 600), savepat
         log_f = log10.(freqs)
         log_S = log10.(spectrum)
 
-        slope = psd["params"]["slope"]
-        intercept = psd["params"]["intercept"]
-        fit_line = 10 .^ (intercept .+ slope .* log_f)
-
         psd_line = lines!(ax, log_f, log_S; color=colors[mod1(i, length(colors))], linewidth=2)
-        fit_line = lines!(ax, log_f, log10.(fit_line); color=:black, linestyle=:dash, linewidth=2)
+
+        slope = psd["params"]["slope"][1]
+        std_slope = psd["params"]["slope"][2]
+        intercept = psd["params"]["intercept"][1]
+        if !isnothing(psd["frange"])
+            log_f_range = psd["frange"][1]:psd["frange"][2]
+            fit_line = 10 .^ (intercept .+ slope .* log_f_range)
+            fit_line = lines!(ax, log_f_range, log10.(fit_line); color=:black, linestyle=:dash, linewidth=2)
+        else
+            fit_line = 10 .^ (intercept .+ slope .* log_f)
+            fit_line = lines!(ax, log_f, log10.(fit_line); color=:black, linestyle=:dash, linewidth=2)
+        end
 
         Legend(fig[row, col], [psd_line, fit_line],
-               ["PSD", "fit: slope = $(round(slope, digits=2))"],
+               [nothing, "α = $(round(slope, digits=2)) ± $(round(std_slope, digits=2))"],
                tellwidth = false,
                patchsize=(8, 8),
-               labelsize=14,
+               labelsize=18,
                framevisible=false,
                halign=:left,
                valign=:bottom)
@@ -259,7 +258,7 @@ function combine_crossCorr_plots(CrossCorrs; nrows=2, ncols=4, fig_size=(1200, 6
                 edges = -1:Δb:1
                 fh = FHist.Hist1D(vals, binedges=edges) |> FHist.normalize
                 centers, counts = bincenters(fh), bincounts(fh)
-                scatter!(ax, centers, counts; label="lag = $(lags[j])")
+                scatter!(ax, centers, counts; label="lag = $(lags[j])", markersize=15)
                 ylims!(ax, minimum(counts[counts .> 0.0]), 1e1)
             end
         end
@@ -267,7 +266,7 @@ function combine_crossCorr_plots(CrossCorrs; nrows=2, ncols=4, fig_size=(1200, 6
         Legend(fig[row, col], ax;
                 tellwidth = false,
                 framevisible = false,
-                labelsize = 14,
+                labelsize = 18,
                 patchsize = (8, 8),
                 halign=:left,
                 valign=:top
