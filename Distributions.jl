@@ -55,8 +55,9 @@ function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
     )
 end
 
-function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
+function make_Taylor(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
+    data[data .< c] .= 0.0
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = mat[:, mask]
@@ -93,13 +94,11 @@ function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
     )
 end
 
-function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data, 1), Δb=0.05,
-                  env=nothing)
+function make_MAD(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
-
-    filtered_mat = ignore_extinction ? mat[:, mask] : data[:, mask]
+    filtered_mat = mat[:, mask]
 
     # Remove species that are never present
     mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
@@ -116,25 +115,25 @@ function make_MAD(data; c=0.0, ignore_extinction=true, missing_thresh=size(data,
     m2 = mean(log_data .^ 2)
 
     if c != 0.0
-        μ_c, σ_c = compute_MAD_params(m1, m2, c)
+        μ, σ = compute_MAD_params(m1, m2, c)
     else
-        μ_c, σ_c = mean(fh), std(fh)
+        μ, σ = mean(fh), std(fh)
     end
 
     centers = bincenters(fh)
-    centers .-= μ_c
-    centers ./= sqrt(2 * σ_c^2)
+    centers .-= μ
+    centers ./= sqrt(2 * σ^2)
 
     norm_counts = bincounts(fh) ./ (integral(fh) * Δb)
     valid = norm_counts .> 0.0
-    erfc_arg = (log(c) - μ_c) / sqrt(2 * σ_c^2)
-    yy = 10 .^ log.((norm_counts[valid]) ./ sqrt(2 / (π * σ_c^2)) .* erfc(erfc_arg))
+    erfc_arg = (log(c) - μ) / sqrt(2 * σ^2)
+    yy = 10 .^ log.((norm_counts[valid]) ./ sqrt(2 / (π * σ^2)) .* erfc(erfc_arg))
     centers = centers[valid]
 
     return Dict(
         "hist" => [centers, yy],
         "cutoff" => c,
-        "hparams" => Dict("μ" => μ_c, "σ" => σ_c),
+        "hparams" => Dict("μ" => μ, "σ" => σ),
         "env" => env
         )
 end

@@ -23,7 +23,7 @@ function logistic_growth(S, y0, Δt, n; r=1.0, K=ones(S), σ=1.0, ε=1e-6, skip=
     end
 
     function condition(u, t, integrator)
-        any(u .< ε)
+        any(u .< 0.0)
     end
     
     function apply_clamp!(integrator)
@@ -60,15 +60,13 @@ function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
         end
     end
 
-    function condition(u, t, integrator)
-        any(u .< ε)
-    end
-    
-    function apply_clamp!(integrator)
-        @. integrator.u = max(0.0, integrator.u)
-    end
-    
-    cb = DiscreteCallback(condition, apply_clamp!)
+    # root when any u[i] hits zero
+    condition(u, t, integrator) = minimum(u)
+    affect!(integrator) = integrator.u .= max.(integrator.u, 0.0)
+
+    # <-- drop direction, keep only rootfind
+    cb = ContinuousCallback(condition, affect!)
+
 
     tspan = (0.0, n * Δt)
     p = (r, A, σ)
@@ -76,8 +74,10 @@ function lotka_volterra(S, y0, Δt, n; r=1.0, A=I(S), σ=1.0, ε=1e-6, skip=1)
 
     prob = SDEProblem(logistic!, diffusion!, y0, tspan, p)
     sol = solve(prob, EM(); callback=cb, saveat=skip * Δt, tstops=tstops)
+    data = Matrix(reduce(hcat, sol.u)')[1:end-1,:]
+    data[data .< ε] .= 0.0
 
-    return Matrix(reduce(hcat, sol.u)')[1:end-1,:]
+    return data
 end
 
 function exp_growth(S, y0, Δt, n; σ=1.0, p=0.95, ε=1e-6, skip=1)

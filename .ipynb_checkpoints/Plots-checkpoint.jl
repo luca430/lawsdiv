@@ -6,6 +6,9 @@ using CairoMakie, FHist
 function combine_AFD_histograms(AFDs; nrows=2, ncols=4, fig_size=(1200, 600), data_label=nothing, savepath=nothing)
     fig = Figure(size=fig_size, fontsize = 18)
     colors = Makie.wong_colors()
+    if length(AFDs) == 1
+        colors = [:red]
+    end
 
     for (i, afd) in enumerate(AFDs)
         # Set figure
@@ -30,7 +33,9 @@ function combine_AFD_histograms(AFDs; nrows=2, ncols=4, fig_size=(1200, 600), da
 
         # Plot
         lineplot = lines!(ax, xarr, g_gamma, color=:black, linewidth=1.5)
-        scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15)
+        scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15,
+                    strokewidth = 0.8,
+                    strokecolor = :black)
         legend_entries = [lineplot, scatterplot]
         # Legend(fig[row, col], ax, tellwidth=false, halign=:right, valign=:top)
         Legend(fig[row, col], legend_entries, ["Gamma(β = $(round(β, digits=2)))", data_label];
@@ -52,6 +57,9 @@ end
 function combine_Taylor_histograms(TAYLORs; nrows=2, ncols=4, fig_size=(1200, 600), data_label=nothing, savepath=nothing)
     fig = Figure(size=fig_size, fontsize = 18)
     colors = Makie.wong_colors()
+    if length(TAYLORs) == 1
+        colors = [:red]
+    end
 
     for (i, taylor) in enumerate(TAYLORs)
         # Set figure
@@ -74,7 +82,9 @@ function combine_Taylor_histograms(TAYLORs; nrows=2, ncols=4, fig_size=(1200, 60
             "y = $(round(p_fit[1], digits=2))x + $(round(p_fit[2], digits=2))" :
             "y = $(round(p_fit[1], digits=2))x - $(abs(round(p_fit[2], digits=2)))"
         lineplot = lines!(ax, xarr, fitted_y, color=:black, linewidth=1.5)
-        scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15)
+        scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15,
+                    strokewidth = 0.8,
+                    strokecolor = :black)
         legend_entries = [lineplot, scatterplot]
         Legend(fig[row, col], legend_entries, [label, data_label];
             tellwidth = false,
@@ -95,13 +105,16 @@ end
 function combine_MAD_histograms(MADs; nrows=2, ncols=4, fig_size=(1200, 600), data_label=nothing, savepath=nothing)
     fig = Figure(size=fig_size, fontsize = 18)
     colors = Makie.wong_colors()
+    if length(MADs) == 1
+        colors = [:red]
+    end
 
     for (i, mad) in enumerate(MADs)
         # Set figure
         row = div(i - 1, ncols) + 1
         col = mod(i - 1, ncols) + 1
         ax = Axis(fig[row, col], xlabel="log(abundances)", ylabel="pdf",
-                  yscale=log10, limits=((-3, 3), (5e-6, 5.0)), title=mad["env"])
+                  yscale=log10, limits=((-3, 3), (5e-6, 10.0)), title=mad["env"])
 
         # Extract params
         centers, yy = mad["hist"]
@@ -116,7 +129,9 @@ function combine_MAD_histograms(MADs; nrows=2, ncols=4, fig_size=(1200, 600), da
 
         # Plot
         lineplot = lines!(ax, xarr, lognorm, color=:black, linewidth=1.5)
-        scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15)
+        scatterplot = scatter!(ax, centers, yy, color=colors[mod1(i, length(colors))], markersize=15,
+                    strokewidth = 0.8,
+                    strokecolor = :black)
         x_cutoff = (log(c) - μ_c) / sqrt(2 * σ_c^2)
 
         # Add cutoff
@@ -149,6 +164,9 @@ end
 function combine_autocorr_plots(AutoCorrs; nrows=2, ncols=4, fig_size=(1200, 600), savepath=nothing)
     fig = Figure(size=fig_size, fontsize=18)
     colors = Makie.wong_colors()
+    if length(AutoCorrs) == 1
+        colors = [:red]
+    end
 
     for (i, corr) in enumerate(AutoCorrs)
         row = div(i - 1, ncols) + 1
@@ -188,6 +206,9 @@ end
 function combine_PSD_plots(PSDs; nrows=2, ncols=4, fig_size=(1200, 600), savepath=nothing)
     fig = Figure(size=fig_size, fontsize=18)
     colors = Makie.wong_colors()
+    if length(PSDs) == 1
+        colors = [:black]
+    end
 
     for (i, psd) in enumerate(PSDs)
         row = div(i - 1, ncols) + 1
@@ -210,10 +231,18 @@ function combine_PSD_plots(PSDs; nrows=2, ncols=4, fig_size=(1200, 600), savepat
         if !isnothing(psd["frange"])
             log_f_range = psd["frange"][1]:psd["frange"][2]
             fit_line = 10 .^ (intercept .+ slope .* log_f_range)
-            fit_line = lines!(ax, log_f_range, log10.(fit_line); color=:black, linestyle=:dash, linewidth=2)
+            if length(PSDs) == 1
+                fit_line = lines!(ax, log_f_range, log10.(fit_line); color=:red, linestyle=:dash, linewidth=4)
+            else
+                fit_line = lines!(ax, log_f_range, log10.(fit_line); color=:black, linestyle=:dash, linewidth=4)
+            end
         else
             fit_line = 10 .^ (intercept .+ slope .* log_f)
-            fit_line = lines!(ax, log_f, log10.(fit_line); color=:black, linestyle=:dash, linewidth=2)
+            if length(PSDs) == 1
+                fit_line = lines!(ax, log_f, log10.(fit_line); color=:red, linestyle=:dash, linewidth=4)
+            else
+                fit_line = lines!(ax, log_f, log10.(fit_line); color=:black, linestyle=:dash, linewidth=4)
+            end
         end
 
         Legend(fig[row, col], [psd_line, fit_line],
@@ -258,7 +287,24 @@ function combine_crossCorr_plots(CrossCorrs; nrows=2, ncols=4, fig_size=(1200, 6
                 edges = -1:Δb:1
                 fh = FHist.Hist1D(vals, binedges=edges) |> FHist.normalize
                 centers, counts = bincenters(fh), bincounts(fh)
-                scatter!(ax, centers, counts; label="lag = $(lags[j])", markersize=15)
+                if length(lags) == 1
+                    scatter!(ax, centers, counts; markersize=15, color=:red, label="",
+                    strokewidth = 0.8,
+                    strokecolor = :black)
+                else
+                    scatter!(ax, centers, counts; label="lag = $(lags[j])", markersize=15,
+                    strokewidth = 0.8,
+                    strokecolor = :black)
+                end
+                
+                # find and draw mode
+                idxmax = argmax(counts)
+                mode_val = centers[idxmax]
+                vlines!(ax, [mode_val];
+                        linestyle = :dash,
+                        linewidth = 2,
+                        label = "mode",
+                        color=:black)
                 ylims!(ax, minimum(counts[counts .> 0.0]), 1e1)
             end
         end
