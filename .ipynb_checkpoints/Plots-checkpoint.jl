@@ -11,25 +11,23 @@ function combine_AFD_histograms(AFDs; nrows=2, ncols=4, fig_size=(1200, 600), da
     end
 
     for (i, afd) in enumerate(AFDs)
-        # Set figure
-        row = div(i - 1, ncols) + 1
-        col = mod(i - 1, ncols) + 1
-        ax = Axis(fig[row, col], xlabel="log(abundances)", ylabel="pdf",
-                  yscale=log10, limits=((-3, 3), (1e-6, 1.0)), title=afd["env"])
-
+        
         # Extract params
         centers, yy = afd["hist"]
-        β = afd["params"]["β"]
-        μ_x = afd["params"]["μ_x"]
-        σ_x = afd["params"]["σ_x"]
+        β = 1.5 #afd["params"]["β"]
         μ = afd["hparams"]["μ"]
         σ = afd["hparams"]["σ"]
         env = afd["env"]
         
+        # Set figure
+        row = div(i - 1, ncols) + 1
+        col = mod(i - 1, ncols) + 1
+        ax = Axis(fig[row, col], xlabel="log(abundances)", ylabel="pdf",
+                  yscale=log10, limits=((-6, 3), (minimum(yy), 10.0)), title=afd["env"])
+        
         # Theoretical Gamma distribution
-        xarr = -3.0:0.05:2
-        g_gamma = [10^(β * x - μ_x / σ_x^2 * exp(x) - loggamma(β) + β * log(μ_x / σ_x^2))
-                   for x in (xarr .* sqrt(2 * σ^2) .+ μ)]
+        xarr = -6.0:0.05:3
+        g_gamma = [10^(β * x - exp(x) - loggamma(β)) for x in xarr.*sqrt(2 * σ^2) .+ μ]
 
         # Plot
         lineplot = lines!(ax, xarr, g_gamma, color=:black, linewidth=1.5)

@@ -6,7 +6,7 @@ using FHist
 using Distributions, SpecialFunctions, LsqFit
 using DataFrames, DataFramesMeta, GLM, Chain
 
-function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
+function make_AFD(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
@@ -18,13 +18,13 @@ function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
     S = size(filtered_mat, 2)
     non_zero_data = [filtered_mat[:, i][filtered_mat[:, i] .> 0.0] for i in 1:S]
-    rescaled_data = [(x .- mean(x)) ./ std(x) for x in non_zero_data]
-    flatten_data = filter(!isnan, vcat(rescaled_data...))
-    log_data = log.(flatten_data[flatten_data .> 0.0])
-
-    μ_x = mean(flatten_data[flatten_data .> 0.0])
-    σ_x = std(flatten_data[flatten_data .> 0.0])
-    β = μ_x^2 / σ_x^2
+    betas = [mean(x)^2 / var(x) for x in non_zero_data]
+    betas = filter(!isnan, betas)
+    β = mean(betas)
+    
+    log_non_zero_data = [log.(filtered_mat[:, i][filtered_mat[:, i] .> 0.0]) for i in 1:S]
+    rescaled_data = [(x .- mean(x)) ./ std(x) for x in log_non_zero_data]
+    log_data = filter(!isnan, vcat(rescaled_data...))
 
     bmin = round(minimum(log_data))
     bmax = round(maximum(log_data))
@@ -42,15 +42,10 @@ function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
     yy = 10 .^ log.(norm_counts[valid])
     centers = centers[valid]
 
-    # Theoretical Gamma distribution
-    xarr = -3.0:0.05:2
-    g_gamma = [10^(β * x - μ_x / σ_x^2 * exp(x) - loggamma(β) + β * log(μ_x / σ_x^2))
-               for x in (xarr .* sqrt(2 * σ^2) .+ μ)]
-
     return Dict(
         "hist" => [centers, yy],
         "hparams" => Dict("μ" => μ, "σ" => σ),
-        "params" => Dict("β" => β, "μ_x" => μ_x, "σ_x" => σ_x),
+        "params" => Dict("β" => β),
         "env" => env
     )
 end
@@ -70,7 +65,7 @@ function make_Taylor(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, e
     var_data = [var(skipmissing(x)) for x in eachcol(filtered_mat)]
 
     log_mean = log.(mean_data)
-    log_var = log.(var_data)
+    log_var = log.(var_data )
 
     bmin = minimum(log_mean)
     bmax = maximum(log_mean)
