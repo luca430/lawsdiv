@@ -14,7 +14,7 @@ function combine_AFD_histograms(AFDs; nrows=2, ncols=4, fig_size=(1200, 600), da
         
         # Extract params
         centers, yy = afd["hist"]
-        β = 1.5 #afd["params"]["β"]
+        β = afd["params"]["β"]
         μ = afd["hparams"]["μ"]
         σ = afd["hparams"]["σ"]
         env = afd["env"]

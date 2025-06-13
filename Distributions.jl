@@ -6,26 +6,33 @@ using FHist
 using Distributions, SpecialFunctions, LsqFit
 using DataFrames, DataFramesMeta, GLM, Chain
 
-function make_AFD(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=nothing)
+function make_AFD(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
+    # Filter data by removing species with low occupancy
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
-    filtered_mat = data[:, mask]
+    filtered_mat = mat[:, mask]
 
-    # Remove species that are never present
+    # Remove species that are never present (the previous filtering created empty rows)
     mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
     filtered_mat = filtered_mat[:, mask]
-
     S = size(filtered_mat, 2)
-    non_zero_data = [filtered_mat[:, i][filtered_mat[:, i] .> 0.0] for i in 1:S]
-    betas = [mean(x)^2 / var(x) for x in non_zero_data]
-    betas = filter(!isnan, betas)
-    β = mean(betas)
-    
-    log_non_zero_data = [log.(filtered_mat[:, i][filtered_mat[:, i] .> 0.0]) for i in 1:S]
-    rescaled_data = [(x .- mean(x)) ./ std(x) for x in log_non_zero_data]
-    log_data = filter(!isnan, vcat(rescaled_data...))
 
+    # Compute shape parameter β from filtered data:
+    # Each species has its own β but according to taylor's law they should all be the same so we take the mean of all βs
+    mean_data = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
+    var_data = [var(skipmissing(x)) for x in eachcol(filtered_mat)]
+    betas = mean_data.^2 ./ var_data
+    mask = .!isnan.(betas) # avois NaNs if any
+    β = prod(betas[mask]) ^ (1 / length(betas[mask]))
+
+    # Log-transform and rescaling of filtered data:
+    # I want to collapse all data into the same curve so I need to standardize everything
+    log_non_zero_data = [log.(skipmissing(x)) for x in eachcol(filtered_mat)]
+    log_rescaled_data = [(x .- mean(x)) ./ std(x) for x in log_non_zero_data[mask]]
+    log_data = filter(!isnan, vcat(log_rescaled_data...))
+
+    # Compute normalized and recentered Histogram
     bmin = round(minimum(log_data))
     bmax = round(maximum(log_data))
     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
@@ -39,34 +46,43 @@ function make_AFD(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=
 
     # Filter non-zero counts
     valid = norm_counts .> 0.0
-    yy = 10 .^ log.(norm_counts[valid])
+    yy = log.(norm_counts[valid])
     centers = centers[valid]
 
+    # Fit to find β
+    model(x, p) = exp(p[1]) .* x .- exp.(x) .- loggamma(exp(p[1]))
+    p0 = [0.0]
+    fit = curve_fit(model, centers, yy, p0)
+    # β = exp(fit.param[1])
+
     return Dict(
-        "hist" => [centers, yy],
+        "hist" => [centers, 10 .^ yy],
         "hparams" => Dict("μ" => μ, "σ" => σ),
         "params" => Dict("β" => β),
         "env" => env
     )
 end
 
-function make_Taylor(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=nothing)
+function make_Taylor(data; missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
-    data[data .< c] .= 0.0
+    # Filter data by removing species with low occupancy
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = mat[:, mask]
 
-    # Remove species that are never present
+    # Remove species that are never present (the previous filtering created empty rows)
     mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
     filtered_mat = filtered_mat[:, mask]
 
+    # Compute mean and var for each species
     mean_data = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
     var_data = [var(skipmissing(x)) for x in eachcol(filtered_mat)]
 
+    # Log transform: it's easier to fit power laws in log-space
     log_mean = log.(mean_data)
-    log_var = log.(var_data )
+    log_var = log.(var_data)
 
+    # Bin x-axis (means) and aggregate y-axis (variances)
     bmin = minimum(log_mean)
     bmax = maximum(log_mean)
     binedges = bmin:Δb:bmax
@@ -91,29 +107,28 @@ end
 
 function make_MAD(data; c=exp(-15), missing_thresh=size(data, 1), Δb=0.05, env=nothing)
 
+    # Filter data by removing species with low occupancy
     mat = preprocess_matrix(data, make_log=false)
     mask = map(col -> count(ismissing, col) <= missing_thresh, eachcol(mat))
     filtered_mat = mat[:, mask]
 
-    # Remove species that are never present
+    # Remove species that are never present (the previous filtering created empty rows)
     mask = .!map(col -> count(ismissing, col) == size(filtered_mat, 1), eachcol(filtered_mat))
     filtered_mat = filtered_mat[:, mask]
 
+    # Compute the means and take the log of means bigger than cutoff
     means = [mean(skipmissing(x)) for x in eachcol(filtered_mat)]
     log_data = [log(x) for x in means if x > c]
 
+    # Make the normalized and recenterd Histogram:
+    # since we are dealing with a truncated lognormal, we need to compute the moments of the truncated pdf which are different from the moments of the histogram
     bmin = floor(minimum(log_data))
     bmax = ceil(maximum(log_data))
     fh = FHist.Hist1D(log_data, binedges=bmin:Δb:bmax)
 
     m1 = mean(log_data)
     m2 = mean(log_data .^ 2)
-
-    if c != 0.0
-        μ, σ = compute_MAD_params(m1, m2, c)
-    else
-        μ, σ = mean(fh), std(fh)
-    end
+    μ, σ = compute_MAD_params(m1, m2, c)
 
     centers = bincenters(fh)
     centers .-= μ
@@ -354,21 +369,13 @@ function compute_MAD_params(m1, m2, c)
         end
     end
     
-    # Create the system with specific parameters
     f! = make_system(m1, m2, c)
-    
-    # Initial guess
     initial_x = [-15.0, 2.0]
-    
-    # Solve the system
     result = nlsolve(f!, initial_x)
-    
-    # Extract solution
     solution = result.zero
 
     return solution[1], solution[2]
 end
-
 
 end # end module
 
